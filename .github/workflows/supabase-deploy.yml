@@ -1,0 +1,67 @@
+name: Supabase Deploy
+
+# Ref: Architecture Document v1.4, Section 13
+# Ref: Technical Design Document v1.3
+#
+# Deploys schema migrations and all Edge Functions to the linked Supabase
+# project on every push to main that touches supabase/**. Requires two
+# repository secrets (Settings > Secrets and variables > Actions):
+#   SUPABASE_ACCESS_TOKEN  - personal access token from supabase.com/dashboard/account/tokens
+#   SUPABASE_PROJECT_REF   - the project ref from your Supabase project's URL/settings
+# Function secrets (OPENROUTER_API_KEY, META_APP_SECRET, etc.) are set
+# separately via `supabase secrets set` — see Environment Setup Guide,
+# Section 6 — not through this workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/supabase-deploy.yml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    name: Deploy migrations + Edge Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        working-directory: supabase
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      - name: Push database migrations
+        working-directory: supabase
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy user-facing Edge Functions (JWT verification enabled)
+        working-directory: supabase
+        run: |
+          for fn in ai-generate repurpose publish connect-social-account team-invite approve-content; do
+            echo "Deploying $fn..."
+            supabase functions deploy "$fn"
+          done
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy sync-model-pricing (cron-triggered, not user-facing)
+        working-directory: supabase
+        # This function is called by the sync-model-pricing.yml scheduled
+        # workflow with a shared secret (x-cron-secret header), not by an
+        # end user — but --no-verify-jwt is still scoped to only this one
+        # function, not the whole deploy, so the other six keep Supabase's
+        # platform-level JWT check as defense-in-depth on top of our own
+        # per-function auth logic.
+        run: supabase functions deploy sync-model-pricing --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

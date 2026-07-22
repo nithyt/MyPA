@@ -45,7 +45,24 @@ cd supabase
 supabase link --project-ref <your-project-ref>
 supabase db push
 
-# 2. Turn the app/ folder into a real Flutter project
+# 2. Set Edge Function secrets (never commit these — see .gitignore)
+supabase secrets set OPENROUTER_API_KEY=sk-or-...
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=eyJ...   # from project API settings
+supabase secrets set CRON_SHARED_SECRET=$(openssl rand -hex 32)
+# Social platform secrets (META_APP_SECRET, LINKEDIN_CLIENT_SECRET, etc.) can
+# wait until each platform's developer approval is in hand — the adapters
+# fail gracefully with a clear message until then.
+
+# 3. Deploy Edge Functions (or let supabase-deploy.yml do this on push to main)
+supabase functions deploy ai-generate
+supabase functions deploy repurpose
+supabase functions deploy publish
+supabase functions deploy connect-social-account
+supabase functions deploy team-invite
+supabase functions deploy approve-content
+supabase functions deploy sync-model-pricing --no-verify-jwt
+
+# 4. Turn the app/ folder into a real Flutter project
 cd ../app
 flutter create . --project-name mypa --org com.yourcompany
 flutter pub get
@@ -53,7 +70,7 @@ flutter analyze          # run this first — the code here was written
                           # without a local Flutter SDK to verify against
 flutter test
 
-# 3. Run it
+# 5. Run it
 flutter run \
   --dart-define=SUPABASE_URL=https://your-project.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=your-anon-key
@@ -64,8 +81,10 @@ flutter run \
 ## Status
 
 - **Database (supabase/migrations/):** All 19 tables, RLS policies, indexes, and seed data written and verified end-to-end against a real Postgres 16 instance, including two bootstrap triggers (new accounts get a Free subscription + credit row; new team workspaces auto-add the creator as admin).
-- **App (app/lib/):** Working skeleton — Supabase-backed auth with routing redirects, the Home screen shell (voice search bar, profile menu, live database-driven ad banners top/bottom, settings-driven bottom nav), and Riverpod providers wired to real repositories. Create, Library, Calendar, and Admin screens are marked stubs with TODOs pointing at the relevant FDD/TDD sections.
-- **Not yet started:** Edge Functions (ai-generate, publish, etc.), CI/CD workflows, platform-specific configuration.
+- **Edge Functions (supabase/functions/):** All 7 functions written — `ai-generate`, `repurpose`, `publish`, `connect-social-account`, `team-invite`, `approve-content`, `sync-model-pricing` — plus shared modules and the OpenRouter/social-platform adapters. All type-checked and linted clean with Deno. Social platform adapters (Meta, LinkedIn, X, TikTok, YouTube) are honest stubs pending each platform's developer API approval (see BRD v1.1 risk register) — the request/response shapes are real, the actual network calls throw a clear "not yet functional" error until real credentials and approval are in place.
+- **App (app/lib/):** Working skeleton — Supabase-backed auth with routing redirects, the Home screen shell (voice search bar, profile menu, live database-driven ad banners top/bottom, settings-driven bottom nav), and Riverpod providers wired to real repositories. Verified clean with `flutter analyze` (0 issues) and `flutter test` (all passing) on a real Flutter 3.44.7 toolchain. Create, Library, Calendar, and Admin screens are marked stubs with TODOs pointing at the relevant FDD/TDD sections.
+- **CI/CD (.github/workflows/):** Three workflows — `flutter-ci.yml` (analyze/test gate, then Android/Windows/macOS/iOS build jobs), `supabase-deploy.yml` (migrations + function deploys on push to main), `sync-model-pricing.yml` (nightly cron calling the pricing sync function). All validated with `actionlint`.
+- **Not yet started:** real social platform app registrations/credentials, store submission/signing configuration, remaining feature screens (Create/Library/Calendar/Admin UI logic).
 
 ## Key architectural decisions (see Architecture Document v1.4 for full detail)
 

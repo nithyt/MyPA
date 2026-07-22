@@ -1,0 +1,48 @@
+name: Sync AI Model Pricing
+
+# Ref: Technical Design Document v1.3, Section 6.1c
+# Ref: Architecture Document v1.4, Section 6.2 (Live Rate Sync)
+#
+# Nightly trigger for the sync-model-pricing Edge Function, which pulls
+# OpenRouter's live pricing catalog and updates the ai_models rate table.
+# GitHub Actions' `schedule` trigger is used here instead of Supabase's
+# pg_cron so that enabling this doesn't require enabling extra Postgres
+# extensions — see Architecture Document v1.4, Section 6.2.
+#
+# Requires three repository secrets:
+#   SUPABASE_PROJECT_REF   - same as in supabase-deploy.yml
+#   SUPABASE_ANON_KEY       - the project's anon/publishable key (satisfies
+#                             Supabase's platform-level JWT check; the
+#                             function's own auth is the secret below)
+#   CRON_SHARED_SECRET      - a random string, matching the Edge Function
+#                             secret of the same name (`supabase secrets set
+#                             CRON_SHARED_SECRET=...`)
+
+on:
+  schedule:
+    # 02:00 UTC nightly
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    name: Trigger sync-model-pricing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the Edge Function
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/sync-model-pricing" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+            -H "x-cron-secret: ${CRON_SHARED_SECRET}")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "sync-model-pricing returned an error"
+            exit 1
+          fi
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CRON_SHARED_SECRET: ${{ secrets.CRON_SHARED_SECRET }}
