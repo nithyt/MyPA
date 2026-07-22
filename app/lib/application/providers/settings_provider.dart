@@ -34,9 +34,13 @@ class ModuleSelectionNotifier extends StateNotifier<Set<String>> {
     final module = kAllNavModules.firstWhere((m) => m.id == moduleId);
     if (module.alwaysOn) return;
 
-    state = state.contains(moduleId)
-        ? {...state}..remove(moduleId)
-        : {...state, moduleId};
+ if (state.contains(moduleId)) {
+      final updated = {...state};
+      updated.remove(moduleId);
+      state = updated;
+    } else {
+      state = {...state, moduleId};
+    }
   }
 }
 
